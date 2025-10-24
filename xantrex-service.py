@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.766.2025.09.19
-# Date: 2025-09-19
+# Version: 2.1.769.2025.10.18
+# Date: 2025-10-18
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -90,8 +90,8 @@ RVC_INV_STATE = {
     0: 0,  # Not Available → Off
     1: 1,  # Stand-by → AES mode
     2: 9,  # Active → Inverting
-    3: 0,  # Disabled → Off
-    4: 4,  # Start-Inhibit → Absorption (best fit)
+    3: 8,  # Pass thru
+    4: 1,  # Start-Inhibit
     5: 2,  # Overload → Fault
     6: 2,  # Short-Circuit → Fault
     7: 2,  # Over-Temperature → Fault
@@ -102,13 +102,13 @@ RVC_INV_STATE = {
 }
 
 RVC_CHG_STATE = {
-    0: 0,   # 0 NA/init       → Off
-    1: 3,   # 1 Bulk          → Bulk
-    2: 4,   # 2 Absorption    → Absorption
-    3: 5,   # 3 Float         → Float
-    4: 7,   # 4 Equalise      → Equalize
-    5: 6,   # 5 Storage       → Storage
-    6: 2,   # 6 Fault         → Fault
+    0: 0,   #  NA/init       → Off
+    1: 0,   #  Not charging
+    2: 3,   #  Bulk
+    3: 4,   #  Absorption
+    4: 4,   #  Absorption
+    5: 7,   #  Equalize
+    6: 5,   #  Float
     # RV-C never sends 7–15, but Venus supports 8–11:
     8: 8,   #   — passthru     → Passthru
     9: 9,   #   — inverting    → Inverting
@@ -413,7 +413,7 @@ INVERTER_DGN_MAP = {
     ],
     0x1FEE8: [  # INVERTER_DC_STATUS
         ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
-        ('/Dc/0/Current',              lambda d: safe_s16(d, 2, 0.02, 'big'),    'A',     'DC 0 Current'),
+        ('/Dc/0/Current',              lambda d: safe_u8(d, 3, 0.05),                     'A' ,     'DC 0 Current'),
     ],
     0x1FEBE: [  # INVERTER_LOAD_PRIORITY
         ('/Settings/InputPriority',    lambda d: safe_u8(d, 0),                  '',      'Input Priority'),
@@ -604,18 +604,18 @@ COMMON_DGN_MAP = {
     ],
     0x1FFCA: [  # CHARGER_AC_STATUS_1
         ('/Ac/In/L1/V',              lambda d: safe_u16(d, 1, 0.05),             'V',     'AC Input L1 Voltage'),
-        ('/Ac/In/L1/I',              lambda d: safe_u16(d, 4, 0.1),              'A',     'AC Input L1 Current'),
+        ('/Ac/In/L1/I',              lambda d: safe_u8(d, 3, 0.05),              'A',     'AC Input L1 Current'),
         ('/Ac/In/L1/P',              lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
-                                               or safe_u16(d, 4, 0.1) is None
-                                               else round(safe_u16(d, 1, 0.05) * safe_u16(d, 4, 0.1), 1)),
+                                               or safe_u8(d, 3, 0.05) is None
+                                               else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
                                                                                  'W',     'AC Input L1 Power'),
         ('/Ac/ActiveIn/L1/V',        lambda d: safe_u16(d, 1, 0.05),             'V',     'Active AC Input L1 Voltage'),
-        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u16(d, 4, 0.1),              'A',     'Active AC Input L1 Current'),
+        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u8(d, 3, 0.05),              'A',     'Active AC Input L1 Current'),
         ('/Ac/ActiveIn/L1/P',       lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
-                                               or safe_u16(d, 4, 0.1) is None
-                                               else round(safe_u16(d, 1, 0.05) * safe_u16(d, 4, 0.1), 1)),
+                                               or safe_u8(d, 3, 0.05) is None
+                                               else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
                                                                                  'W',     'Active AC Input L1 Power'),
     ],    
     0x1FDA0: [  # DC_SOURCE_LOAD_CONTROL
@@ -919,6 +919,9 @@ class XantrexService:
         self.register_path(self._InverterService, '/Ac/Out/Total/P', 0.0,                                 writeable=False, unit='W', description='Total Active Power')
         self.register_path(self._InverterService, '/Ac/Out/Total/I', 0.0,                                 writeable=False, unit='A', description='Total Current')
 
+        self.register_path(self._InverterService, '/Ac/Grid/P', None, writeable=False, unit='W', description='Grid total active power (alias of /Ac/In/P)')
+        self.register_path(self._InverterService, '/Ac/Grid/I', None, writeable=False, unit='A', description='Grid total current (alias of /Ac/In/I)')
+
         mode_item = self.register_path(self._InverterService, '/Mode',                 4, writeable = False,    unit = '',  description = 'Inverter Mode - Venus OS Switch?')   # “On” (normal/auto, charger + inverter available)
         # Give it a text mapper so GUI shows "On"/"Off" instead of 3/4
         mode_item._gettextcallback = (lambda _path, value: {1:"Charger only", 2:"Inverter only", 3:"Auto/On", 4:"Off"}.get(int(value), str(value)) )
@@ -1174,7 +1177,7 @@ class XantrexService:
             st["need"] -= 1
             st["deadline"] = time.monotonic() + 2.0
               
-            try
+            try:
                 # Finished this BAM?
                 if st["need"] == 0:
                     payload = bytes(st["buf"])[: st["len"]]  # trim to announced len
@@ -1209,7 +1212,7 @@ class XantrexService:
 
                         temp = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
                         if temp is not None:
-                            FIRMWARE_VERSION = = temp.group(1)
+                            FIRMWARE_VERSION = temp.group(1)
                             self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
                             self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
                     
@@ -1433,7 +1436,7 @@ class XantrexService:
                     service[path] = value       # → pushes to D-Bus
                         
                     # DGN is known and matched; value was decoded and now SENT                        
-                    logger.info(f"[{self.frame_count:06}] [SENT][{service.descriptor}] DGN=0x{dgn:05X} | path={path} | value={value} {unit} | desc=\"{description}\" | raw={data.hex(' ').upper()}")
+                    logger.info(f"[{self.frame_count:06}]     [SENT][{service.descriptor}] DGN=0x{dgn:05X} | path={path} | value={value} {unit} | desc=\"{description}\" | raw={data.hex(' ').upper()}")
                         
                     #if dgn in (0x1FFCB, 0x1FFDD, 0x1FFD6, 0x1FFD7, 0x1FFDC):
                     #    logger.info(f"[GUIDMODS DISPLAY] DGN=0x{dgn:05X} | path={path} | value={value} {unit} | desc=\"{description}\"")
