@@ -2,6 +2,8 @@
 # Version: 2.1.769.2025.10.18
 # Date: 2025-10-18
 
+# Forked by Stephen Tenberg
+
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
 # This script reads raw RV-C (CAN) data from a Xantrex Freedom Pro inverter/charger
@@ -470,9 +472,9 @@ CHARGER_DGN_MAP = {
         ('/Mode',                    lambda d: safe_u8(d, 0),                    '',      'Charger mode (standby)'),
     ],
     0x1FFC7: [  # CHARGER_STATUS
-        ('/State',                   lambda d: RVC_CHG_STATE.get((int(safe_u8(d, 0) or 0)) & 0x0F, 0),  '',      'Charger State'),
-        ('/Dc/0/PowerPercent',       lambda d: safe_u8(d, 2),                    '%',     'Charger Power Percent'),        
-        #('/Dc/0/Voltage',            lambda d: safe_u8(d, 0, 0.01),              'V',     'Charger Voltage'),
+        ('/State',                   lambda d: RVC_CHG_STATE.get((int(safe_u8(d, 6) or 0)) & 0x0F, 0),  '',      'Charger State'),
+        #('/Dc/0/PowerPercent',       lambda d: safe_u8(d, 2),                    '%',     'Charger Power Percent'),
+        #('/Dc/0/Voltage',            lambda d: safe_u8(d, 1, 0.05),              'V',     'Charger Voltage'),
         #('/Dc/0/Current',            lambda d: safe_u8(d, 1, 0.1),               'A',     'Charger Current'),
 
     ],
